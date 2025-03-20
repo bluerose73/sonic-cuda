@@ -1,4 +1,5 @@
 #include <sonic-cuda/core/sonic_clean.h>
+#include <cuda_runtime.h>
 
 /*
 32 * 32 input tile
@@ -46,9 +47,7 @@ static void fill_peak_filter(float filter[7][7]) {
 __global__ void sonic_clean_kernel(
         const float* data, int height, int width, int frames,
         const float* background, float threshold, int ignore_border_px,
-        int* peak_x, int* peak_y, int* peak_f, int* n_locs,
-        float* blurred_data = nullptr, float* local_max_data = nullptr  // for debugging
-) {
+        int* peak_x, int* peak_y, int* peak_f, int* n_locs) {
     
     __shared__ float tile_in[IN_TILE_WIDTH][IN_TILE_WIDTH];
     __shared__ float tile_med[MED_TILE_WIDTH][MED_TILE_WIDTH];
@@ -98,11 +97,6 @@ __global__ void sonic_clean_kernel(
         }
 
         tile_med[threadIdx.y][threadIdx.x] = sum;
-
-        // Dump blurred data if pointer is not null
-        if (blurred_data != nullptr && med_x >= 0 && med_x < width && med_y >= 0 && med_y < height) {
-            blurred_data[f * height * width + med_y * width + med_x] = sum;
-        }
     }
     __syncthreads();
 
@@ -126,11 +120,6 @@ __global__ void sonic_clean_kernel(
             tile_in[threadIdx.y][threadIdx.x] = center;
         } else {
             tile_in[threadIdx.y][threadIdx.x] = 0;
-        }
-
-        // Dump local maxima data if pointer is not null
-        if (local_max_data != nullptr && local_max_x >= 0 && local_max_x < width && local_max_y >= 0 && local_max_y < height) {
-            local_max_data[f * height * width + local_max_y * width + local_max_x] = tile_in[threadIdx.y][threadIdx.x];
         }
     }
     __syncthreads();
@@ -158,24 +147,21 @@ __global__ void sonic_clean_kernel(
 
 void sonic_clean(const float* d_data, int height, int width, int frames,
                   const float* d_background, float threshold, int ignore_border_px,
-                  int* d_peak_x, int* d_peak_y, int* d_peak_f, int* n_locs,
-                  float* blurred_data, float* local_max_data  // for debugging
-) {
+                  int* d_peak_x, int* d_peak_y, int* d_peak_f, int* n_locs) {
     fill_blur_filter_11(h_filter_11);
     fill_peak_filter(h_peak_filter);
     cudaMemcpyToSymbol(d_filter_11, h_filter_11, 11 * 11 * sizeof(float));
     cudaMemcpyToSymbol(d_peak_filter, h_peak_filter, 7 * 7 * sizeof(float));
 
-    int *n_loc;
-    cudaMalloc(&n_loc, sizeof(int));
-    cudaMemset(n_loc, 0, sizeof(int));
+    int *d_n_locs;
+    cudaMalloc(&d_n_locs, sizeof(int));
+    cudaMemset(d_n_locs, 0, sizeof(int));
 
     dim3 grid((width - 1) / OUT_TILE_WIDTH + 1, (height - 1) / OUT_TILE_WIDTH + 1, frames);
     dim3 block(IN_TILE_WIDTH, IN_TILE_WIDTH);
     sonic_clean_kernel<<<grid, block>>>(d_data, height, width, frames, d_background,
-            threshold, ignore_border_px, d_peak_x, d_peak_y, d_peak_f, n_loc,
-            blurred_data, local_max_data);
-
-    cudaMemcpy(n_locs, n_loc, sizeof(int), cudaMemcpyDeviceToHost);
-    cudaFree(n_loc);
+            threshold, ignore_border_px, d_peak_x, d_peak_y, d_peak_f, d_n_locs);
+    
+    cudaMemcpy(n_locs, d_n_locs, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaFree(d_n_locs);
 }

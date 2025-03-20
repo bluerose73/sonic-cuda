@@ -7,6 +7,7 @@
 #include <sonic-cuda/core/sonic_clean_v2.h>
 #include <cmath>
 #include <filesystem>
+#include <chrono>
 
 // Test data are in ./test/data folder
 // imdata.bin float
@@ -63,9 +64,9 @@ int main(int argc, char* argv[]) {
     // Create output directory if it doesn't exist
     std::filesystem::create_directories(output_dir);
 
-    const int height = 64;
-    const int width = 64;
-    const int frames = 2500;
+    const int height = 1024;
+    const int width = 1024;
+    const int frames = 100;
     const float threshold = 100.0f;
     const int ignore_border_px = 15;
     const int peak_size = static_cast<int>(std::ceil(static_cast<float>(width * height) / 49)) * frames;
@@ -75,8 +76,6 @@ int main(int argc, char* argv[]) {
     std::vector<int> h_peak_x;
     std::vector<int> h_peak_y;
     std::vector<int> h_peak_f;
-    std::vector<float> h_blurred_data;
-    std::vector<float> h_local_max_data;
     int n_locs = 0;
 
     read_data("./test/data/imdata.bin", h_data, height * width * frames);
@@ -103,40 +102,41 @@ int main(int argc, char* argv[]) {
     h_peak_x.resize(peak_size);
     h_peak_y.resize(peak_size);
     h_peak_f.resize(peak_size);
-    h_blurred_data.resize(height * width * frames);
-    h_local_max_data.resize(height * width * frames);
 
     float *d_data, *d_background;
     int *d_peak_x, *d_peak_y, *d_peak_f;
-    float *d_blurred_data, *d_local_max_data;  // for debugging
 
     cudaMalloc(&d_data, h_data.size() * sizeof(float));
     cudaMalloc(&d_background, h_background.size() * sizeof(float));
     cudaMalloc(&d_peak_x, h_peak_x.size() * sizeof(int));
     cudaMalloc(&d_peak_y, h_peak_y.size() * sizeof(int));
     cudaMalloc(&d_peak_f, h_peak_f.size() * sizeof(int));
-    cudaMalloc(&d_blurred_data, h_data.size() * sizeof(float));
-    cudaMalloc(&d_local_max_data, h_data.size() * sizeof(float));
 
     cudaMemcpy(d_data, h_data.data(), h_data.size() * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_background, h_background.data(), h_background.size() * sizeof(float), cudaMemcpyHostToDevice);
 
+    // timer starts here
+    auto start = std::chrono::high_resolution_clock::now();
+
     if (version == "v1") {
-        sonic_clean(d_data, height, width, frames, d_background, threshold, ignore_border_px, d_peak_x, d_peak_y, d_peak_f, &n_locs,
-                    d_blurred_data, d_local_max_data);
+        sonic_clean(d_data, height, width, frames, d_background, threshold, ignore_border_px, d_peak_x, d_peak_y, d_peak_f, &n_locs);
     } else if (version == "v2") {
-        sonic_clean_v2(d_data, height, width, frames, d_background, threshold, ignore_border_px, d_peak_x, d_peak_y, d_peak_f, &n_locs,
-                       d_blurred_data, d_local_max_data);
+        sonic_clean_v2(d_data, height, width, frames, d_background, threshold, ignore_border_px, d_peak_x, d_peak_y, d_peak_f, &n_locs);
     } else {
         std::cerr << "Invalid version specified. Use 'v1' or 'v2'." << std::endl;
         return 1;
     }
 
+    cudaDeviceSynchronize();
+
+    // timer ends here
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    std::cout << "Elapsed time: " << elapsed.count() << " ms" << std::endl;
+
     cudaMemcpy(h_peak_x.data(), d_peak_x, n_locs * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_peak_y.data(), d_peak_y, n_locs * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_peak_f.data(), d_peak_f, n_locs * sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_blurred_data.data(), d_blurred_data, h_blurred_data.size() * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_local_max_data.data(), d_local_max_data, h_local_max_data.size() * sizeof(float), cudaMemcpyDeviceToHost);
 
     std::vector<Peak> detected_peaks(n_locs);
     for (int i = 0; i < n_locs; ++i) {
@@ -186,34 +186,6 @@ int main(int argc, char* argv[]) {
         given_peaks_csv.close();
     } else {
         std::cerr << "Failed to open given_peaks.csv for writing" << std::endl;
-    }
-
-    std::ofstream blurred_data_csv(output_dir + "/blurred_data.csv");
-    if (blurred_data_csv.is_open()) {
-        // dump the first frame
-        for (int i = 0; i < height; ++i) {
-            for (int j = 0; j < width; ++j) {
-                blurred_data_csv << h_blurred_data[j * height + i] << ",";
-            }
-            blurred_data_csv << "\n";
-        }
-        blurred_data_csv.close();
-    } else {
-        std::cerr << "Failed to open blurred_data.csv for writing" << std::endl;
-    }
-
-    std::ofstream local_max_data_csv(output_dir + "/local_max_data.csv");
-    if (local_max_data_csv.is_open()) {
-        // dump the first frame
-        for (int i = 0; i < height; ++i) {
-            for (int j = 0; j < width; ++j) {
-                local_max_data_csv << h_local_max_data[j * height + i] << ",";
-            }
-            local_max_data_csv << "\n";
-        }
-        local_max_data_csv.close();
-    } else {
-        std::cerr << "Failed to open local_max_data.csv for writing" << std::endl;
     }
 
     cudaFree(d_data);

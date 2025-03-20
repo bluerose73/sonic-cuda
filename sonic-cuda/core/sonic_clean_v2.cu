@@ -164,9 +164,7 @@ __global__ void find_peak_kernel(const float* d_data, int height, int width, int
 
 void sonic_clean_v2(const float* d_data, int height, int width, int frames,
     const float* d_background, float threshold, int ignore_border_px,
-    int* d_peak_x, int* d_peak_y, int* d_peak_f, int* n_locs,
-    float* blurred_data, float* local_max_data  // for debugging
-) {
+    int* d_peak_x, int* d_peak_y, int* d_peak_f, int* n_locs) {
     fill_blur_filter_11(h_filter_11);
     fill_peak_filter(h_peak_filter);
     cudaMemcpyToSymbol(d_filter_11, h_filter_11, 11 * 11 * sizeof(float));
@@ -190,13 +188,6 @@ void sonic_clean_v2(const float* d_data, int height, int width, int frames,
 
     dim3 peak_grid_size((width - 1) / PEAK_OUT_TILE_WIDTH + 1, (height - 1) / PEAK_OUT_TILE_WIDTH + 1, frames);
     find_peak_kernel<<<peak_grid_size, block_size>>>(d_local_max_data, height, width, frames, d_peak_x, d_peak_y, d_peak_f, n_loc);
-
-    if (local_max_data != nullptr) {
-        cudaMemcpy(local_max_data, d_local_max_data, frames * height * width * sizeof(float), cudaMemcpyDeviceToHost);
-    }
-    if (blurred_data != nullptr) {
-        cudaMemcpy(blurred_data, d_blurred_data, frames * height * width * sizeof(float), cudaMemcpyDeviceToHost);
-    }
 
     cudaMemcpy(n_locs, n_loc, sizeof(int), cudaMemcpyDeviceToHost);
     cudaFree(n_loc);

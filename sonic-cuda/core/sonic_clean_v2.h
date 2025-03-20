@@ -19,8 +19,7 @@
 */
 void sonic_clean_v2(const float* d_data, int height, int width, int frames,
     const float* d_background, float threshold, int ignore_border_px,
-    int* d_peak_x, int* d_peak_y, int* d_peak_f, int* n_locs,
-    float* blurred_data=nullptr, float* local_max_data=nullptr  // for debugging
+    int* d_peak_x, int* d_peak_y, int* d_peak_f, int* n_locs
 );
 
 #endif // SONIC_CUDA_CORE_SONIC_CLEAN_V2_H
