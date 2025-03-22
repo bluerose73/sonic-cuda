@@ -11,13 +11,15 @@
 * frames - number of frames
 * background - 3D array of background image (frames x height x width)
 * ignore_border_px - number of pixels to ignore at the border of the image
-* loc_x - output x location of the emitter
+* loc_x - output x location of the emitter,
+*         allocated by the caller to be at least (height * width + 48) / 49 * frames.
+*         Sonic guarantees that there is at most one local maximum in each 7x7 region.
 * loc_y - output y location of the emitter
-* loc_f - output frame id of the emitter, guaranteed to be an integer
-* n_loc - output count of detected emitters
+* loc_f - output frame id of the emitter
+* n_locs - output count of detected emitters
 */
 void sonic(const float* data, int height, int width, int frames,
     const float* background, float threshold, int ignore_border_px,
-    float* loc_x, float* loc_y, float* loc_f, int* n_loc);
+    float* loc_x, float* loc_y, int* loc_f, int* n_locs);
 
 #endif // SONIC_CUDA_CORE_SONIC_H

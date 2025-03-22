@@ -2,7 +2,10 @@
 #define SONIC_CUDA_CORE_SONIC_CLEAN_V2_H
 
 /*
-* sonic_clean - Image clean and peak detection
+* sonic_clean_v2 - Image clean and peak detection
+*
+* This function is similar to sonic_clean, but it is ~30% faster.
+* However, it needs more GPU VRAM - 2 * image_stack_size more than sonic_clean.
 * 
 * Arguments:
 * d_data - 3D array of image frames (frames x height x width)
