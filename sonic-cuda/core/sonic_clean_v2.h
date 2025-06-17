@@ -19,8 +19,11 @@
 * d_peak_y - output y location of the emitter
 * d_peak_f - output frame id of the emitter
 * n_locs - output count of detected peaks
+*
+* Returns:
+* error code. 0 if successful, non-zero if an error occurred.
 */
-void sonic_clean_v2(const float* d_data, int height, int width, int frames,
+int sonic_clean_v2(const float* d_data, int height, int width, int frames,
     const float* d_background, float threshold, int ignore_border_px,
     int* d_peak_x, int* d_peak_y, int* d_peak_f, int* n_locs
 );

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <chrono>
 #include <fstream>
+#include <cstdlib>
 
 // Function to sort locations by frames, then by x, then by y
 void sort_locations(std::vector<float>& x, std::vector<float>& y, std::vector<int>& f, size_t size) {
@@ -40,26 +41,75 @@ void sort_locations(std::vector<float>& x, std::vector<float>& y, std::vector<in
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " <output-dir>" << std::endl;
+    if (argc != 8) {
+        std::cerr << "Usage: " << argv[0] << " <input-dir> <output-dir> <height> <width> <frames> <threshold> <ignore-border-px>" << std::endl;
+        std::cerr << "Example: " << argv[0] << " input_data output_results 1024 1024 1 100.0 15" << std::endl;
         return 1;
     }
 
-    std::string output_dir = argv[1];
+    std::string input_dir = argv[1];
+    std::string output_dir = argv[2];
+    const int height = std::atoi(argv[3]);
+    const int width = std::atoi(argv[4]);
+    const int frames = std::atoi(argv[5]);
+    const float threshold = std::atof(argv[6]);
+    const int ignore_border_px = std::atoi(argv[7]);
+
+    // Validate arguments
+    if (height <= 0 || width <= 0 || frames <= 0 || threshold < 0 || ignore_border_px < 0) {
+        std::cerr << "Error: All numeric arguments must be positive (threshold and ignore_border_px can be 0)" << std::endl;
+        return 1;
+    }
 
     // Create output directory if it doesn't exist
     std::filesystem::create_directories(output_dir);
 
-    const int height = 1024;
-    const int width = 1024;
-    const int frames = 100;
-    const float threshold = 100.0f;
-    const int ignore_border_px = 15;
-
     std::vector<float> h_data;
     std::vector<float> h_background;
-    read_data("./test/data/imdata.bin", h_data, height * width * frames);
-    read_data("./test/data/bg.bin", h_background, height * width * frames);
+    read_data((std::filesystem::path(input_dir) / "imdata.bin").string(), h_data, height * width * frames);
+    read_data((std::filesystem::path(input_dir) / "bg.bin").string(), h_background, height * width * frames);
+
+    // // Write imdata to CSV
+    // std::ofstream imdata_csv(output_dir + "/imdata.csv");
+    // if (imdata_csv.is_open()) {
+    //     for (int frame = 0; frame < frames; ++frame) {
+    //         for (int row = 0; row < height; ++row) {
+    //             for (int col = 0; col < width; ++col) {
+    //                 int idx = frame * height * width + row * width + col;
+    //                 imdata_csv << h_data[idx];
+    //                 if (col < width - 1) imdata_csv << ",";
+    //             }
+    //             imdata_csv << "\n";
+    //         }
+    //         if (frame < frames - 1) imdata_csv << "\n"; // Add blank line between frames
+    //     }
+    //     imdata_csv.close();
+    //     std::cout << "Written imdata to " << output_dir << "/imdata.csv" << std::endl;
+    // } else {
+    //     std::cerr << "Failed to open imdata.csv for writing" << std::endl;
+    //     return 1;
+    // }
+
+    // // Write background to CSV
+    // std::ofstream bg_csv(output_dir + "/bg.csv");
+    // if (bg_csv.is_open()) {
+    //     for (int frame = 0; frame < frames; ++frame) {
+    //         for (int row = 0; row < height; ++row) {
+    //             for (int col = 0; col < width; ++col) {
+    //                 int idx = frame * height * width + row * width + col;
+    //                 bg_csv << h_background[idx];
+    //                 if (col < width - 1) bg_csv << ",";
+    //             }
+    //             bg_csv << "\n";
+    //         }
+    //         if (frame < frames - 1) bg_csv << "\n"; // Add blank line between frames
+    //     }
+    //     bg_csv.close();
+    //     std::cout << "Written background data to " << output_dir << "/bg.csv" << std::endl;
+    // } else {
+    //     std::cerr << "Failed to open bg.csv for writing" << std::endl;
+    //     return 1;
+    // }
 
     const int max_n_locs = (height * width + 48) / 49 * frames;
     std::vector<float> loc_x(max_n_locs);
@@ -69,21 +119,26 @@ int main(int argc, char* argv[]) {
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    sonic(h_data.data(), height, width, frames, h_background.data(), threshold, ignore_border_px,
-          loc_x.data(), loc_y.data(), loc_f.data(), &n_locs);
+    int err_code = sonic(h_data.data(), height, width, frames, h_background.data(),
+            threshold, ignore_border_px, loc_x.data(), loc_y.data(), loc_f.data(), &n_locs);
+    
+    if (err_code != 0) {
+        std::cerr << "Sonic function failed with error code: " << err_code << std::endl;
+        return 1;
+    }
     
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
     std::cout << "Elapsed time: " << duration.count() << " ms" << std::endl;
     
     std::vector<int> given_loc_f;
-    read_data("./test/data/F.bin", given_loc_f);
+    read_data((std::filesystem::path(input_dir) / "F.bin").string(), given_loc_f);
     int given_n_locs = given_loc_f.size();
 
     std::vector<float> given_loc_x;
     std::vector<float> given_loc_y;
-    read_data("./test/data/X.bin", given_loc_x, given_n_locs);
-    read_data("./test/data/Y.bin", given_loc_y, given_n_locs);
+    read_data((std::filesystem::path(input_dir) / "X.bin").string(), given_loc_x, given_n_locs);
+    read_data((std::filesystem::path(input_dir) / "Y.bin").string(), given_loc_y, given_n_locs);
 
     std::cout << "Detected number of locations: " << n_locs << std::endl;
     std::cout << "Given number of locations: " << given_n_locs << std::endl;

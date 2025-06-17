@@ -17,9 +17,14 @@
 * loc_y - output y location of the emitter
 * loc_f - output frame id of the emitter
 * n_locs - output count of detected emitters
+*
+* Returns:
+* error code. 0 if successful, non-zero if an error occurred.
+* In case of an error, the error message is printed to stderr.
 */
-void sonic(const float* data, int height, int width, int frames,
-    const float* background, float threshold, int ignore_border_px,
-    float* loc_x, float* loc_y, int* loc_f, int* n_locs);
+int sonic(const float* data, int height, int width, int frames,
+          const float* background,
+          float threshold, int ignore_border_px,
+          float* loc_x, float* loc_y, int* loc_f, int* n_locs);
 
 #endif // SONIC_CUDA_CORE_SONIC_H

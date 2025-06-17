@@ -1,4 +1,16 @@
 #include <sonic-cuda/core/sonic_clean_v2.h>
+#include <cuda_runtime.h>
+#include <cstdio>
+
+// CUDA error checking macro
+#define CUDA_CHECK(call) \
+    do { \
+        cudaError_t error = call; \
+        if (error != cudaSuccess) { \
+            fprintf(stderr, "sonic_clean_v2:CUDA error at %s:%d - %s\n", __FILE__, __LINE__, cudaGetErrorString(error)); \
+            goto cleanup; \
+        } \
+    } while(0)
 
 static float h_filter_11[11][11];
 static float h_peak_filter[7][7];
@@ -162,35 +174,80 @@ __global__ void find_peak_kernel(const float* d_data, int height, int width, int
     }
 }
 
-void sonic_clean_v2(const float* d_data, int height, int width, int frames,
+int sonic_clean_v2(const float* d_data, int height, int width, int frames,
     const float* d_background, float threshold, int ignore_border_px,
     int* d_peak_x, int* d_peak_y, int* d_peak_f, int* n_locs) {
+    
+    // Initialize all variables at the beginning to avoid goto bypass issues
+    int *n_loc = nullptr;
+    float *d_blurred_data = nullptr, *d_local_max_data = nullptr;
+    dim3 block_size(IN_TILE_WIDTH, IN_TILE_WIDTH);
+    dim3 blur_grid_size, local_max_grid_size, peak_grid_size;
+    
+    // Input parameter validation
+    if (d_data == nullptr) {
+        fprintf(stderr, "sonic_clean_v2:Error: d_data is NULL\n");
+        return -1;
+    }
+    if (d_background == nullptr) {
+        fprintf(stderr, "sonic_clean_v2:Error: d_background is NULL\n");
+        return -1;
+    }
+    if (d_peak_x == nullptr || d_peak_y == nullptr || d_peak_f == nullptr) {
+        fprintf(stderr, "sonic_clean_v2:Error: peak arrays are NULL\n");
+        return -1;
+    }
+    if (n_locs == nullptr) {
+        fprintf(stderr, "sonic_clean_v2:Error: n_locs is NULL\n");
+        return -1;
+    }
+    if (height <= 0 || width <= 0 || frames <= 0) {
+        fprintf(stderr, "sonic_clean_v2:Error: invalid dimensions (height=%d, width=%d, frames=%d)\n", 
+                height, width, frames);
+        return -1;
+    }
+    
     fill_blur_filter_11(h_filter_11);
     fill_peak_filter(h_peak_filter);
-    cudaMemcpyToSymbol(d_filter_11, h_filter_11, 11 * 11 * sizeof(float));
-    cudaMemcpyToSymbol(d_peak_filter, h_peak_filter, 7 * 7 * sizeof(float));
-
-    int *n_loc;
-    cudaMalloc(&n_loc, sizeof(int));
-    cudaMemset(n_loc, 0, sizeof(int));
-
-    float *d_blurred_data, *d_local_max_data;
-    cudaMalloc(&d_blurred_data, frames * height * width * sizeof(float));
-    cudaMalloc(&d_local_max_data, frames * height * width * sizeof(float));
-
-    dim3 block_size(IN_TILE_WIDTH, IN_TILE_WIDTH);
-
-    dim3 blur_grid_size((width - 1) / BLUR_OUT_TILE_WIDTH + 1, (height - 1) / BLUR_OUT_TILE_WIDTH + 1, frames);
-    blur_kernel<<<blur_grid_size, block_size>>>(d_data, d_background, height, width, frames, threshold, ignore_border_px, d_blurred_data);
     
-    dim3 local_max_grid_size((width - 1) / LOCAL_MAX_OUT_TILE_WIDTH + 1, (height - 1) / LOCAL_MAX_OUT_TILE_WIDTH + 1, frames);
+    CUDA_CHECK(cudaMemcpyToSymbol(d_filter_11, h_filter_11, 11 * 11 * sizeof(float)));
+    CUDA_CHECK(cudaMemcpyToSymbol(d_peak_filter, h_peak_filter, 7 * 7 * sizeof(float)));
+
+    CUDA_CHECK(cudaMalloc(&n_loc, sizeof(int)));
+    CUDA_CHECK(cudaMemset(n_loc, 0, sizeof(int)));
+
+    CUDA_CHECK(cudaMalloc(&d_blurred_data, frames * height * width * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_local_max_data, frames * height * width * sizeof(float)));
+
+    blur_grid_size = dim3((width - 1) / BLUR_OUT_TILE_WIDTH + 1, (height - 1) / BLUR_OUT_TILE_WIDTH + 1, frames);
+    blur_kernel<<<blur_grid_size, block_size>>>(d_data, d_background, height, width, frames, threshold, ignore_border_px, d_blurred_data);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    
+    local_max_grid_size = dim3((width - 1) / LOCAL_MAX_OUT_TILE_WIDTH + 1, (height - 1) / LOCAL_MAX_OUT_TILE_WIDTH + 1, frames);
     local_max_kernel<<<local_max_grid_size, block_size>>>(d_blurred_data, height, width, frames, d_local_max_data);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
 
-    dim3 peak_grid_size((width - 1) / PEAK_OUT_TILE_WIDTH + 1, (height - 1) / PEAK_OUT_TILE_WIDTH + 1, frames);
+    peak_grid_size = dim3((width - 1) / PEAK_OUT_TILE_WIDTH + 1, (height - 1) / PEAK_OUT_TILE_WIDTH + 1, frames);
     find_peak_kernel<<<peak_grid_size, block_size>>>(d_local_max_data, height, width, frames, d_peak_x, d_peak_y, d_peak_f, n_loc);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
 
-    cudaMemcpy(n_locs, n_loc, sizeof(int), cudaMemcpyDeviceToHost);
-    cudaFree(n_loc);
-    cudaFree(d_blurred_data);
-    cudaFree(d_local_max_data);
+    CUDA_CHECK(cudaMemcpy(n_locs, n_loc, sizeof(int), cudaMemcpyDeviceToHost));
+
+    // Success - clean up and return
+    if (n_loc) cudaFree(n_loc);
+    if (d_blurred_data) cudaFree(d_blurred_data);
+    if (d_local_max_data) cudaFree(d_local_max_data);
+
+    return 0;
+
+cleanup:
+    // Error occurred - free all allocated resources
+    if (n_loc) cudaFree(n_loc);
+    if (d_blurred_data) cudaFree(d_blurred_data);
+    if (d_local_max_data) cudaFree(d_local_max_data);
+    
+    return -1;
 }

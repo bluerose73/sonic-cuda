@@ -17,7 +17,7 @@
 * n_locs - number of detected peaks
 * d_roi - output ROI (n_locs x 7 x 7)
 */
-void sonic_roi(const float* d_data, int height, int width, int frames,
+int sonic_roi(const float* d_data, int height, int width, int frames,
     const int *d_peak_x, const int *d_peak_y, const int *d_peak_f, int n_locs,
     float* d_roi
 );

@@ -12,7 +12,7 @@
 * d_loc_x - output x locations of the emitter
 * d_loc_y - output y locations of the emitter
 */
-void sonic_localization(const float* d_roi, const int* d_peak_x, const int* d_peak_y, int n_locs,
+int sonic_localization(const float* d_roi, const int* d_peak_x, const int* d_peak_y, int n_locs,
     float* d_loc_x, float* d_loc_y
 );
 
